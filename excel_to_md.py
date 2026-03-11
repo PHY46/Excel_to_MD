@@ -25,16 +25,20 @@ from collections import deque
 import re
 
 # ===== 파일 처리 옵션 =====
-MODE = "FILE"
+MODE = "ALL"
 
 # ALL 모드일 때 사용
-ROOT = Path(r"D:\test_file")
+ROOT = Path(r"D:\tchat_preprocess_repo\tchat_preprocessing\Tech_doc\Mat_Dept\basic_research\raw_data")
 
 # FILE 모드일 때 사용
-FILE = Path(r"D:\test.xlsx")
+FILE = Path(r"D:\tchat_preprocess_repo\performance_test\test_file\C0000000000010455057_R0000000000010608265_160524_Dr.Holzbach Consulting 보고서.xlsx")
+# "D:\tchat_preprocess_repo\tchat_preprocessing\Tech_doc\Mat_Dept\Compound\raw_data\C0000000000010455090_R0000000000010608299_2022_Y85(마모 향상 Alpin Studless) 개발.xlsx"
+# "D:\tchat_preprocess_repo\tchat_preprocessing\Tech_doc\Mat_Dept\Compound\raw_data\C0000000000010462046_R0000000000010615527_중국 Tubeless 중단거리 내마모용 컴파운드 임시생산 결과 보고서 별첨.xlsx"
+# "D:\tchat_preprocess_repo\performance_test\test_file\C0000000000010455057_R0000000000010608265_160524_Dr.Holzbach Consulting 보고서.xlsx"
+# "D:\tchat_preprocess_repo\tchat_preprocessing\Tech_doc\Mat_Dept\basic_research\raw_data\C0000000000010461766_R0000000000010615246_[21년] The role of mercapto silane in silica reinforced SBR-BR compound_P55X 기반 new silane 평가 보고_최종.xlsx"
 
 # 출력 폴더
-OUTPUT_DIR = Path(r"D:\workspace")
+OUTPUT_DIR = Path(r"D:\workspace\basic_research")
 
 # ===== 시트 처리 옵션 =====
 SHEET_MODE = "FIRST"
@@ -62,10 +66,10 @@ def count_border(cell):
 def select_sheets(wb):
     sheets = []
     if SHEET_MODE == "FIRST":
-        ws = wb.worksheets[0]
-        if EXCLUDE_HIDDEN and ws.sheet_state != "visible":
-            return []
-        return [ws]
+        for ws in wb.worksheets:
+            if EXCLUDE_HIDDEN and ws.sheet_state == "visible":
+                return [ws]
+        return []
     elif SHEET_MODE == "ALL":
         for ws in wb.worksheets:
             if EXCLUDE_HIDDEN and ws.sheet_state != "visible":
@@ -116,7 +120,7 @@ def find_table_blocks(ws):
                 block.append((r, c))
 
                 # 인접 셀이 같은 표에 포함되는지 확인
-                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                     nr, nc = r+dr, c+dc
                     if 1 <= nr <= max_row and 1 <= nc <= max_col:
                         if (nr, nc) not in visited:
@@ -182,12 +186,24 @@ def block_to_markdown(ws, block):
     remained_cols = [c for c in range(min_c, max_c + 1) if c not in empty_cols]
     col_count = len(remained_cols)
 
-    # 모든 열이 삭제되면 빈 문자열 반환
+    # 남는 열이 없으면 빈 문자열 반환
     if col_count == 0:
         return ""
 
+    # 행 개수 계산
+    row_count = 0
     for r in range(min_r, max_r + 1):
+        is_row_empty = True
+        for c in range(min_c, max_c + 1):
+            if c in empty_cols:
+                continue
+            if ws.cell(r, c).value not in (None, ""):
+                is_row_empty = False
+                break
+        if not is_row_empty:
+            row_count += 1
 
+    for r in range(min_r, max_r + 1):
         # 원본 기준 빈 행 삭제
         is_row_empty = True
         for c in range(min_c, max_c + 1):
@@ -203,7 +219,6 @@ def block_to_markdown(ws, block):
         row_vals = []
 
         for c in range(min_c, max_c + 1):
-
             if c in empty_cols:
                 continue
 
@@ -223,75 +238,116 @@ def block_to_markdown(ws, block):
             else:
                 row_vals.append("" if val is None else str(val))
 
-        # 열 개수에 따라 다른 형태
-        if col_count <= 1:
+        # 행이 1개 이하인 경우 텍스트로 반환
+        if row_count <= 1:
             line_text = " ".join(v for v in row_vals if v)
             if line_text.strip():
                 text.append(line_text.strip())
         else:
             md.append("| " + " | ".join(row_vals) + " |")
 
-    # 열이 1개 이하인 경우 텍스트로 반환
-    if col_count <= 1:
+    # 행이 1개 이하인 경우 텍스트로 반환
+    if row_count <= 1:
         return "\n".join(text)
 
     # 헤더 구분선 → 첫 행을 헤더로 가정
     if len(md) > 1:
-        col_count = len(md[0].split("|")) - 2
-        separator = "|" + "|".join(["---"] * col_count) + "|"
+        col_count_in_md = len(md[0].split("|")) - 2
+        separator = "|" + "|".join(["---"] * col_count_in_md) + "|"
         md.insert(1, separator)
 
     return "\n".join(md)
 
 # 엑셀 → 마크다운 변환
 def convert_excel_to_md(input_path, output_path):
-    # if output_path.exists():
     if False:
-        print(f"△ 이미 존재, 변환 생략:{output_path.name}")
-    else:
-        try:
-            wb = load_workbook(input_path, data_only=True)
-            output_lines = []
+        print(f"△ 이미 존재, 변환 생략: {output_path.name}")
+        return
 
-            for ws in select_sheets(wb):
-                sheet_name = ws.title
-                output_lines.append(f"# {sheet_name}\n")
+    try:
+        wb = load_workbook(input_path, data_only=True)
+        output_lines = []
 
-                blocks = find_table_blocks(ws)
-                blocks_sorted = sorted(blocks, key=lambda b: block_bounds(b)[0])
+        for ws in select_sheets(wb):
+            sheet_name = ws.title
+            output_lines.append(f"\n# {sheet_name}\n")
 
-                block_map = {}
-                for block in blocks_sorted:
-                    min_r, max_r, _, _ = block_bounds(block)
-                    block_map[min_r] = (block, max_r)
+            # 테두리 기반 블록 탐색
+            blocks = find_table_blocks(ws)
+            # blocks = filter_blocks_by_first_cell_border(ws, blocks)
 
-                current_row = 1
-                max_row = ws.max_row
+            # 외곽 프레임 처리: 경계 제거 후 내부 재분석
+            # blocks = filter_outer_frame_blocks(ws, blocks)
 
-                while current_row <= max_row:
-                    if current_row in block_map:
-                        block, max_r = block_map[current_row]
-                        md_table = "\n" + block_to_markdown(ws, block)
-                        output_lines.append(md_table)
-                        output_lines.append("")
-                        current_row = max_r + 1
-                        continue
+            # 시작 행 기준으로 정렬
+            blocks_sorted = sorted(blocks, key=lambda b: block_bounds(b)[0])
 
-                    row_vals = [cell.value for cell in ws[current_row]]
-                    text = " ".join(str(v) for v in row_vals if v)
-                    if text.strip():
-                        # text = to_subheading(text)
-                        output_lines.append(text)
-                    current_row += 1
+            # 시작 행 → (블록, 끝 행) 매핑
+            block_map = {}
+            for block in blocks_sorted:
+                min_r, max_r, _, _ = block_bounds(block)
+                if min_r not in block_map:
+                    block_map[min_r] = []
+                block_map[min_r].append((block, max_r))
 
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(output_lines))
-            print(f"✔ 변환 완료: {output_path}")
-        except Exception as e:
-            err_msg = str(e)
-            print(f"✕ 변환 실패: {input_path.name}")
-            print(f"내용: {err_msg[:120]}")
+            current_row = 1
+            max_row = ws.max_row
+
+            while current_row <= max_row:
+                if current_row in block_map:
+                    blocks_at_row = block_map[current_row]
+                    
+                    # 열 순서대로 정렬
+                    blocks_at_row_sorted = sorted(blocks_at_row, key=lambda x: block_bounds(x[0])[2])
+                    
+                    for block, max_r in blocks_at_row_sorted:
+                        min_r, _, _, _ = block_bounds(block)
+                        first_row_cells = [(r, c) for (r, c) in block if r == min_r]
+                        first_row_vals = [ws.cell(r, c).value for r, c in first_row_cells]
+                        
+                        # 첫 행에 값이 1개만 있으면 제목으로 처리
+                        non_empty_vals = [v for v in first_row_vals if v not in (None, "")]
+                        
+                        if len(non_empty_vals) == 1:
+                            # 첫 행을 제목으로 출력
+                            title = str(non_empty_vals[0]).strip()
+                            output_lines.append(f"\n{title}\n")
+                            
+                            # 첫 행 제거한 블록으로 테이블 생성
+                            new_block = [(r, c) for (r, c) in block if r != min_r]
+                            if new_block:
+                                md_table = block_to_markdown(ws, new_block)
+                                if md_table.strip():
+                                    output_lines.append(md_table)
+                                    output_lines.append("")
+                        else:
+                            # 일반 테이블
+                            md_table = "\n" + block_to_markdown(ws, block)
+                            if md_table.strip():
+                                output_lines.append(md_table)
+                                output_lines.append("")
+
+                    max_end_row = max(end_r for _, end_r in blocks_at_row)
+                    current_row = max_end_row + 1
+                    continue
+
+                # 테이블이 아닌 일반 텍스트 영역
+                row_vals = [cell.value for cell in ws[current_row]]
+                text = "\n".join(str(v) for v in row_vals if v)
+                if text.strip():
+                    # text = to_subheading(text)
+                    output_lines.append(text)
+                current_row += 1
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(output_lines))
+
+        print(f"✓ 변환 완료: {output_path}")
+    except Exception as e:
+        err_msg = str(e)
+        print(f"✕ 변환 실패: {input_path.name}")
+        print(f"내용: {err_msg[:200]}")
 
 
 def collect_FILE():
